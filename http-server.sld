@@ -110,6 +110,7 @@
       (handle-request req resp)
 
       ;; broadcast back to http thread that response is ready
+;; TODO: need to guarantee C is waiting before sending broadcast
       (condition-variable-broadcast! cv)
       (write `(iterate loop))
       (newline)
