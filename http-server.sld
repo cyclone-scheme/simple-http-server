@@ -94,24 +94,42 @@
 
 (define lock (make-mutex))
 (define cv (make-condition-variable))
+(define var (list 0))
+
+(define scm-lock (make-mutex))
+(define scm-cv (make-condition-variable))
+(define scm-var (list 0))
 
 (define req (make-c-opaque))
 (define resp (make-c-opaque))
 
 (define (make-http-server port handle-request)
-  (let ((shared-objs (vector port lock cv req resp)))
+  (let ((shared-objs (vector port 
+                             lock cv var 
+                             scm-lock scm-cv scm-var 
+                             req resp)))
     (Cyc-minor-gc) ;; Ensure above objs are in a fixed memory location on heap
     (server-init shared-objs)
     (let loop ()
       ;; let http thread wake us up when it receives a request
-      (mutex-lock! lock)
-      (mutex-unlock! lock cv)
+      (let wait-loop ()
+        (mutex-lock! scm-lock)
+        (if (equal? (car scm-var) 1)
+            (begin
+              (set-car! scm-var 0)
+              (mutex-unlock! scm-lock))
+            (begin
+              (mutex-unlock! scm-lock scm-cv)
+              (wait-loop))))
 
       (handle-request req resp)
 
       ;; broadcast back to http thread that response is ready
-;; TODO: need to guarantee C is waiting before sending broadcast
-      (condition-variable-broadcast! cv)
+      (mutex-lock! lock)
+      (set-car! var 1)
+      (condition-variable-signal! cv)
+      (mutex-unlock! lock)
+
       (write `(iterate loop))
       (newline)
       (loop))))
